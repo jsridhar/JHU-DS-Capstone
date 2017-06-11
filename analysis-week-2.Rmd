@@ -1,0 +1,148 @@
+---
+title: "Capstone - Exploratory Data Analysis"
+author: "Sri"
+date: "May 12, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Understanding the problem
+
+Analyze a large corpus of text documents to discover the structure in the data and how words are put together. 
+The corpora are collected from publicly available sources by a web crawler. The crawler checks for language, to mainly get texts consisting of the desired language. The first step in building a predictive model for text is understanding the distribution and relationship between the words, tokens, and phrases in the text.
+
+<b>Exploratory analysis</b> - perform a thorough exploratory analysis of the data, understanding the distribution of words and relationship between the words in the corpora.
+
+<b>Understand frequencies of words and word pairs</b> - build figures and tables to understand variation in the frequencies of words and word pairs in the data.
+
+### Data loading, cleaning & initial analysis
+
+Getting to know the general structure of the data, such as the lines / words / chars / etc. will help with better optimizing the model & program.
+
+```{r, echo=FALSE, warning=FALSE}
+
+library(stringi); library(tm)
+
+loadfile <- function(fileName) {
+  f <- sprintf("./Coursera-SwiftKey/final/en_US/en_US.%s.txt", fileName)
+
+  fileData <- readLines(con <- file(f, open = "r")) #load the file
+  on.exit(close(con))
+  
+  return(fileData)
+}
+
+analyzeData <- function(fileName, fileData) {
+  f <- sprintf("./Coursera-SwiftKey/final/en_US/en_US.%s.txt", fileName)
+  fileSizeMB <- round(file.size(f)/(1024*1024)) #determine file size
+
+  totLines <- length(fileData) #number of lines
+  wordsPerLine <- round(sum(stri_count_words(fileData))/totLines) #avg words per line
+  charsPerLine <- round(sum(stri_length(fileData))/totLines) #avg characters per line
+  charsPerWord <- round(charsPerLine/wordsPerLine)
+
+  return(data.frame(fileName, fileSizeMB, totLines, wordsPerLine, charsPerLine, charsPerWord))
+}
+
+cleanData <- function(fileData) {
+  sampleText <- sample(fileData, 5000) #choose 5000 lines for effective memory usage
+  sampleText <- removeNumbers(sampleText)
+  sampleText <- removePunctuation(sampleText)
+  sampleText <- stripWhitespace(sampleText)
+  return(sampleText)
+}
+
+tweets <- loadfile("twitter"); blogs <- loadfile("blogs"); news <- loadfile("news")
+rbind(analyzeData("twitter", tweets), analyzeData("blogs", blogs), analyzeData("news", news))
+
+tweets <- cleanData(tweets); blogs <- cleanData(blogs); news <- cleanData(news)
+```
+
+### Exploratory analysis
+
+#### Some words are more frequent than others - what are the distributions of word frequencies?
+```{r, echo=FALSE, warning=FALSE}
+
+library(RWeka); library(rJava); library(ggplot2); library(gridExtra)
+
+generateGrams <- function(input, f) {
+  gram <- NGramTokenizer(input, Weka_control(min=f, max=f))
+  gram <- data.frame(table(gram))
+  gram <- gram[order(gram$Freq, decreasing = TRUE),]
+  gram$gram <- factor(gram$gram, levels=unique(as.character(gram$gram)))
+  return(gram)
+}
+
+plotGrams <- function(f) {
+  p1 <- ggplot(head(generateGrams(tweets, f), 5), aes(x=gram, y=Freq)) + 
+    geom_bar(stat="Identity", fill="blue") + coord_flip() + ggtitle("Twitter")
+
+  p2 <- ggplot(head(generateGrams(blogs, f), 5), aes(x=gram, y=Freq)) + 
+    geom_bar(stat="Identity", fill="green") + coord_flip() + ggtitle("Blogs")
+
+  p3 <- ggplot(head(generateGrams(news, f), 5), aes(x=gram, y=Freq)) + 
+    geom_bar(stat="Identity", fill="red") + coord_flip() + ggtitle("News")
+
+  grid.arrange(p1, p2, p3, ncol=3, top = sprintf("Top 5 %s-grams", f))
+}
+
+plotGrams(1)
+```
+
+
+#### What are the frequencies of 2-grams and 3-grams in the dataset?
+```{r, echo=FALSE, warning=FALSE}
+
+plotGrams(2)
+
+plotGrams(3)
+```
+
+While the n-grams are not exactly same, there are repeating words. Two observations from this exercise: (1) the follow-on words are different depending on type of entry - blog vs. twitter (2) most common words are the same however frequency of use differs based on the context of text. Ultimately, the context of the text (i.e. twitter vs. news vs. blogs) plays a significant role in predicting the next word in a sentence. But let's not come to any conclusions and continue with the exploration...
+
+#### How many unique words do you need in a frequency sorted dictionary to cover 50% of all word instances in the language? 90%?
+```{r, echo=FALSE, warning=FALSE}
+
+estimateCoverage <- function(input, f) {
+
+  nwords <- 0
+  coverage <- f*sum(input$Freq)
+  for (i in 1:nrow(input)) {
+    if (nwords >= coverage) {return (i)}
+    nwords <- nwords + input$Freq[i]
+  }
+}
+
+grams <- generateGrams(c(tweets, blogs, news), 1)
+print("Number of unique words for coverage @ 50%")
+estimateCoverage(grams, 0.5)
+
+print("Number of unique words for coverage $ 90%")
+estimateCoverage(grams, 0.9)
+```
+
+As the coverage increases, the number of unique words needed explodes exponentially - not surprising. If we had further performed the analysis including the context of the data, for example the blog data is about a sporting event, the coverage of words would be significantly different.
+
+#### How do you evaluate how many of the words come from foreign languages?
+
+A simple method would be to use a word dictionary to filter out the foreign words. Another method would be to use custom dictionary for adding words that are repeating, even if the word is not valid for each language. For example, in technical blogs word infra usually refers to infrastructure. It might be fine to use it in a blog, removing it might affect the user keyboard performance.
+
+
+#### Can you think of a way to increase the coverage?
+
+Understanding the context of the text is extremely useful. Personalized local dictionary with frequently used phrases will be highly effective. For example, I have used "For example" multiple times in the past three paras. Most users repeat the frequently used phrases much more often than we expect. Understanding the lexical structure of the language will help predict the next word even without typing a single letter after the current word.
+
+### Future plans
+
+Based on this preliminary analysis, the Shiny app should focus on the following:
+
+- Focus on memory and CPU requirements for any model (extremely critical for robust response)
+
+- N-grams based model is certainly worth considering
+
+- Data pre-processing techniques should be expanded further to reduce the startup time for the app
+
+- Ability to predict next 3 words would be a nice addition
